@@ -1,0 +1,7 @@
+/venv
+*.todo
+/doc
+/data
+/chromadb
+/models
+*.env

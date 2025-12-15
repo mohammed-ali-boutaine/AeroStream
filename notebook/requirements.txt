@@ -1,0 +1,10 @@
+datasets
+pandas
+jupyterlab
+ipywidgets
+matplotlib
+wordcloud
+nltk
+sentence-transformers
+chromadb
+xgboost
