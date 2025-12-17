@@ -1,10 +1,13 @@
 datasets
 pandas
-jupyterlab
-ipywidgets
 matplotlib
+seaborn
+wordcloud
+ipywidgets
+nltk
 wordcloud
 nltk
 sentence-transformers
-chromadb
+chromadb 
+sentence-transformers
 xgboost
