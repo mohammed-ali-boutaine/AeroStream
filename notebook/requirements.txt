@@ -9,5 +9,8 @@ wordcloud
 nltk
 sentence-transformers
 chromadb 
-sentence-transformers
 xgboost
+
+transformers 
+torch
+sentencepiece
