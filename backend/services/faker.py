@@ -28,6 +28,7 @@ NEGATIVE_REASONS = [
 ]
 
 class Tweet(BaseModel):
+    airline_sentiment: str
     airline_sentiment_confidence: float
     airline: str
     negativereason: Optional[str]
@@ -114,6 +115,7 @@ class FakeTweetService:
         tweet_created = datetime.now(timezone.utc).isoformat()
 
         return Tweet(
+            airline_sentiment=sentiment,
             airline_sentiment_confidence=confidence,
             airline=airline,
             negativereason=negativereason,

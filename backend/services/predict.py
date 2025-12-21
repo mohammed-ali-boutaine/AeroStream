@@ -11,7 +11,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('../logs/backend.log'),
+        logging.FileHandler('./logs/backend.log'),
         logging.StreamHandler()
     ]
 )
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class AirlineSentimentService:
     """Service for airline sentiment prediction."""
     
-    def __init__(self, model_path="../models/best_model.pkl", encoder_path="../models/label_encoder.pkl"):
+    def __init__(self, model_path="./models/best_model.pkl", encoder_path="./models/label_encoder.pkl"):
         self.model_path = Path(model_path)
         self.encoder_path = Path(encoder_path)
         self.model = None

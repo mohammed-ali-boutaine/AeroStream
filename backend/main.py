@@ -9,12 +9,12 @@ from pathlib import Path
 from services import AirlineSentimentService, FakeTweetService, Tweet
 
 # Configure logging
-Path('../logs').mkdir(exist_ok=True)
+Path('./logs').mkdir(exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('../logs/backend.log'),
+        logging.FileHandler('./logs/backend.log'),
         logging.StreamHandler()
     ]
 )

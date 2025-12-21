@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta
 from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.operators.python import PythonOperator # type: ignore
 import requests
 import psycopg2
 from psycopg2.extras import execute_values
 import logging
 import json
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,34 +22,34 @@ default_args = {
 }
 
 # Configuration
-API_BASE_URL = 'http://host.docker.internal:8000'  # Adjust if backend is in Docker network
+API_BASE_URL = 'http://host.docker.internal:8000'  
 DB_CONFIG = {
-    'host': 'postgres',
-    'database': 'airflow',
-    'user': 'airflow',
-    'password': 'airflow'
+    'host': 'postgres_backend',  
+    'database': 'backend_db',
+    'user': 'ali',
+    'password': 'root'
 }
 
 
 def fetch_data_from_api(**context):
     """
-    Task 1: Fetch fake tweets from the API
+    Task 1: Fetch fake tweets from the API in micro-batches
     """
     try:
-        batch_size = 20  # Number of tweets to fetch
+        batch_size = 20  # Micro-batch size
         url = f"{API_BASE_URL}/fake-tweets?batch_size={batch_size}"
         
-        logger.info(f"Fetching data from API: {url}")
+        logger.info(f"Fetching micro-batch data from API: {url}")
         response = requests.get(url, timeout=30)
         response.raise_for_status()
         
         tweets = response.json()
-        logger.info(f"Successfully fetched {len(tweets)} tweets from API")
+        logger.info(f"Successfully fetched {len(tweets)} tweets in micro-batch from API")
         
         # Push data to XCom for next task
         context['task_instance'].xcom_push(key='raw_tweets', value=tweets)
         
-        return f"Fetched {len(tweets)} tweets"
+        return f"Fetched {len(tweets)} tweets in micro-batch"
     
     except requests.exceptions.RequestException as e:
         logger.error(f"API request failed: {e}")
@@ -58,12 +59,30 @@ def fetch_data_from_api(**context):
         raise
 
 
+def clean_text(text):
+    """
+    Clean and preprocess text data
+    """
+    if not text:
+        return ""
+    
+    # Remove URLs
+    text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
+    # Remove mentions
+    text = re.sub(r'@\w+', '', text)
+    # Remove hashtags (keep the text)
+    text = re.sub(r'#', '', text)
+    # Remove extra whitespace
+    text = ' '.join(text.split())
+    
+    return text.strip()
+
+
 def process_text_data(**context):
     """
     Task 2: Process the text data
-    - Clean text
-    - Extract features
-    - Transform data for storage
+    - Clean and preprocess text for sentiment prediction
+    - Prepare data for storage
     """
     try:
         # Pull raw tweets from XCom
@@ -72,25 +91,26 @@ def process_text_data(**context):
         if not tweets:
             raise ValueError("No tweets received from API")
         
-        logger.info(f"Processing {len(tweets)} tweets")
+        logger.info(f"Processing and cleaning {len(tweets)} tweets")
         
         processed_data = []
         for tweet in tweets:
+            # Clean the text
+            clean_tweet_text = clean_text(tweet.get('text', ''))
+            
             # Extract and process fields
             processed_tweet = {
                 'airline': tweet.get('airline'),
-                'sentiment': tweet.get('airline_sentiment_confidence'),  # This seems to be confidence
+                'airline_sentiment': tweet.get('airline_sentiment'),  # From API (simulated prediction)
                 'negativereason': tweet.get('negativereason'),
                 'tweet_created': tweet.get('tweet_created'),
                 'text': tweet.get('text', ''),
-                'text_length': len(tweet.get('text', '')),
-                'has_mention': '@' in tweet.get('text', ''),
-                'has_hashtag': '#' in tweet.get('text', ''),
+                'clean_text': clean_tweet_text,
                 'processed_at': datetime.now().isoformat()
             }
             processed_data.append(processed_tweet)
         
-        logger.info(f"Successfully processed {len(processed_data)} tweets")
+        logger.info(f"Successfully processed and cleaned {len(processed_data)} tweets")
         
         # Push processed data to XCom
         context['task_instance'].xcom_push(key='processed_tweets', value=processed_data)
@@ -104,7 +124,7 @@ def process_text_data(**context):
 
 def store_in_database(**context):
     """
-    Task 3: Store processed data in PostgreSQL database
+    Task 3: Store processed sentiment predictions in PostgreSQL database
     """
     try:
         # Pull processed tweets from XCom
@@ -122,21 +142,23 @@ def store_in_database(**context):
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
         
-        # Create table if it doesn't exist
+        # Create table if it doesn't exist (matching init.py schema)
         create_table_query = """
         CREATE TABLE IF NOT EXISTS airline_tweets (
             id SERIAL PRIMARY KEY,
-            airline VARCHAR(100),
-            sentiment FLOAT,
-            negativereason VARCHAR(255),
-            tweet_created VARCHAR(100),
-            text TEXT,
-            text_length INTEGER,
-            has_mention BOOLEAN,
-            has_hashtag BOOLEAN,
-            processed_at TIMESTAMP,
-            inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            airline_sentiment VARCHAR(20) NOT NULL,
+            negativereason VARCHAR(100),
+            airline VARCHAR(50) NOT NULL,
+            text TEXT NOT NULL,
+            tweet_created TIMESTAMP,
+            clean_text TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT check_sentiment CHECK (airline_sentiment IN ('positive', 'negative', 'neutral'))
         );
+        
+        CREATE INDEX IF NOT EXISTS idx_airline ON airline_tweets(airline);
+        CREATE INDEX IF NOT EXISTS idx_sentiment ON airline_tweets(airline_sentiment);
+        CREATE INDEX IF NOT EXISTS idx_tweet_created ON airline_tweets(tweet_created);
         """
         cursor.execute(create_table_query)
         logger.info("Table created or already exists")
@@ -144,22 +166,18 @@ def store_in_database(**context):
         # Prepare data for bulk insert
         insert_query = """
         INSERT INTO airline_tweets 
-        (airline, sentiment, negativereason, tweet_created, text, 
-         text_length, has_mention, has_hashtag, processed_at)
+        (airline_sentiment, negativereason, airline, text, tweet_created, clean_text)
         VALUES %s
         """
         
         values = [
             (
+                tweet['airline_sentiment'],
+                tweet['negativereason'] if tweet['negativereason'] else None,
                 tweet['airline'],
-                tweet['sentiment'],
-                tweet['negativereason'],
-                tweet['tweet_created'],
                 tweet['text'],
-                tweet['text_length'],
-                tweet['has_mention'],
-                tweet['has_hashtag'],
-                tweet['processed_at']
+                tweet['tweet_created'],
+                tweet['clean_text']
             )
             for tweet in processed_tweets
         ]
@@ -189,24 +207,68 @@ def store_in_database(**context):
 
 def validate_pipeline(**context):
     """
-    Task 4: Validate that data was stored correctly
+    Task 4: Validate and aggregate data for dashboard
     """
     try:
         # Connect to database
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
         
-        # Get statistics
+        # Get aggregated statistics
         cursor.execute("""
             SELECT 
                 COUNT(*) as total_tweets,
                 COUNT(DISTINCT airline) as unique_airlines,
-                AVG(text_length) as avg_text_length,
-                MAX(inserted_at) as last_insert
+                SUM(CASE WHEN airline_sentiment = 'negative' THEN 1 ELSE 0 END) as negative_tweets,
+                ROUND(
+                    100.0 * SUM(CASE WHEN airline_sentiment = 'negative' THEN 1 ELSE 0 END) / COUNT(*), 
+                    2
+                ) as negative_percentage,
+                MAX(created_at) as last_insert
             FROM airline_tweets
         """)
         
         stats = cursor.fetchone()
+        
+        # Get sentiment distribution
+        cursor.execute("""
+            SELECT airline_sentiment, COUNT(*) as count
+            FROM airline_tweets
+            GROUP BY airline_sentiment
+            ORDER BY count DESC
+        """)
+        sentiment_dist = cursor.fetchall()
+        
+        # Get airline statistics
+        cursor.execute("""
+            SELECT 
+                airline,
+                COUNT(*) as tweet_count,
+                SUM(CASE WHEN airline_sentiment = 'positive' THEN 1 ELSE 0 END) as positive,
+                SUM(CASE WHEN airline_sentiment = 'negative' THEN 1 ELSE 0 END) as negative,
+                ROUND(
+                    100.0 * SUM(CASE WHEN airline_sentiment = 'positive' THEN 1 ELSE 0 END) / COUNT(*),
+                    2
+                ) as satisfaction_rate
+            FROM airline_tweets
+            GROUP BY airline
+            ORDER BY tweet_count DESC
+            LIMIT 10
+        """)
+        airline_stats = cursor.fetchall()
+        
+        # Get main negative reasons
+        cursor.execute("""
+            SELECT 
+                negativereason,
+                COUNT(*) as count
+            FROM airline_tweets
+            WHERE negativereason IS NOT NULL AND negativereason != ''
+            GROUP BY negativereason
+            ORDER BY count DESC
+            LIMIT 10
+        """)
+        negative_reasons = cursor.fetchall()
         
         cursor.close()
         conn.close()
@@ -214,11 +276,23 @@ def validate_pipeline(**context):
         validation_result = {
             'total_tweets': stats[0],
             'unique_airlines': stats[1],
-            'avg_text_length': float(stats[2]) if stats[2] else 0,
-            'last_insert': str(stats[3])
+            'negative_tweets': stats[2],
+            'negative_percentage': float(stats[3]) if stats[3] else 0,
+            'last_insert': str(stats[4]),
+            'sentiment_distribution': [{'sentiment': s[0], 'count': s[1]} for s in sentiment_dist],
+            'top_airlines': [
+                {
+                    'airline': a[0],
+                    'tweet_count': a[1],
+                    'positive': a[2],
+                    'negative': a[3],
+                    'satisfaction_rate': float(a[4])
+                } for a in airline_stats
+            ],
+            'top_negative_reasons': [{'reason': r[0], 'count': r[1]} for r in negative_reasons]
         }
         
-        logger.info(f"Pipeline validation: {validation_result}")
+        logger.info(f"Pipeline validation and aggregation completed: {validation_result}")
         
         return validation_result
     
@@ -229,12 +303,12 @@ def validate_pipeline(**context):
 
 # Define the DAG
 with DAG(
-    'api_to_database_pipeline',
+    'airline_sentiment_etl_pipeline',
     default_args=default_args,
-    description='Fetch tweets from API, process text, and store in PostgreSQL',
-    schedule_interval='@hourly',  # Run every hour
+    description='ETL: Fetch tweets in micro-batches, preprocess, predict sentiment, and store in PostgreSQL',
+    schedule_interval='@hourly',  # Run every hour for micro-batch processing
     catchup=False,
-    tags=['api', 'text-processing', 'database', 'tweets'],
+    tags=['etl', 'sentiment-analysis', 'airline', 'micro-batch'],
 ) as dag:
     
     # Task 1: Fetch data from API
