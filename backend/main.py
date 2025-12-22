@@ -1,24 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware 
-from pydantic import BaseModel, Field
-from typing import List, Dict
 import time
-import logging
-from pathlib import Path
-
+from typing import List
 from services import AirlineSentimentService, FakeTweetService, Tweet
+from schemas.prediction import BatchPredictionRequest, PredictionRequest, PredictionResponse
+from database.database import test_connection
 
-# Configure logging
-Path('./logs').mkdir(exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('./logs/backend.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
 
 
 app = FastAPI(
@@ -38,53 +25,21 @@ app.add_middleware(
 # Initialize prediction service
 try:
     predictor = AirlineSentimentService()
-    logger.info("Prediction service initialized successfully")
+    print("Prediction service initialized successfully")
 except Exception as e:
-    logger.error(f"Failed to initialize prediction service: {e}")
+    print(f"Failed to initialize prediction service: {e}")
     predictor = None
+
 
 # Initialize fake tweet service
 try:
     faker = FakeTweetService()
-    logger.info("Fake tweet service initialized successfully")
+    print("Fake tweet service initialized successfully")
 except Exception as e:
-    logger.error(f"Failed to initialize fake tweet service: {e}")
+    print(f"Failed to initialize fake tweet service: {e}")
     faker = None
 
 
-# Request/Response Models
-class PredictionRequest(BaseModel):
-    text: str = Field(..., description="Tweet or review text to analyze", min_length=1)
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "text": "@VirginAmerica plus you've added commercials to the experience... tacky."
-            }
-        }
-
-
-class PredictionResponse(BaseModel):
-    text: str
-    clean_text: str
-    predicted_sentiment: str
-    confidence: float
-    probabilities: Dict[str, float]
-
-
-class BatchPredictionRequest(BaseModel):
-    texts: List[str] = Field(..., description="List of texts to analyze")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "texts": [
-                    "@VirginAmerica plus you've added commercials to the experience... tacky.",
-                    "@united amazing flight! Great service!",
-                    "@SouthwestAir flight delayed again"
-                ]
-            }
-        }
 
 
 @app.get("/")
@@ -106,11 +61,15 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    db_ok, db_count = test_connection()
     return {
         "status": "healthy",
-        "predictor": "loaded" if predictor else "unavailable",
-        "faker": "loaded" if faker else "unavailable",
-        "timestamp": time.time()
+        "services": {
+            "predictor": predictor is not None,
+            "faker": faker is not None,
+            "database": db_ok
+        },
+        "tweets": db_count if db_ok else 0
     }
 
 
@@ -130,12 +89,11 @@ async def predict_sentiment(req: PredictionRequest):
         )
     
     try:
-        logger.info(f"Prediction request: {req.text[:50]}...")
         result = predictor.predict(req.text)
-        logger.info(f"Prediction result: {result['predicted_sentiment']} (confidence: {result['confidence']:.2f})")
+        print(f"Prediction result: {result['predicted_sentiment']} (confidence: {result['confidence']:.2f})")
         return PredictionResponse(**result)
     except Exception as e:
-        logger.error(f"Prediction failed: {str(e)}")
+        print(f"Prediction failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
 
@@ -155,15 +113,14 @@ async def batch_predict_sentiment(req: BatchPredictionRequest):
         )
     
     try:
-        logger.info(f"Batch prediction request: {len(req.texts)} texts")
         results = predictor.batch_predict(req.texts)
-        logger.info(f"Batch prediction completed: {len(results)} results")
+        print(f"Batch prediction completed: {len(results)} results")
         return {
             "count": len(results),
             "results": results
         }
     except Exception as e:
-        logger.error(f"Batch prediction failed: {str(e)}")
+        print(f"Batch prediction failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
 
 
@@ -184,10 +141,10 @@ async def generate_fake_tweets(batch_size: int = 10):
     
     try:
         tweets = faker.generate_batch(batch_size)
-        logger.info(f"Generated {len(tweets)} fake tweets")
+        print(f"Generated {len(tweets)} fake tweets")
         return tweets
     except Exception as e:
-        logger.error(f"Fake tweet generation failed: {str(e)}")
+        print(f"Fake tweet generation failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Fake tweet generation failed: {str(e)}")
 
 
@@ -211,12 +168,12 @@ async def predict_fake_tweet():
         # Predict sentiment
         result = predictor.predict(tweet.text)
         
-        logger.info(f"Generated and predicted fake tweet: {result['predicted_sentiment']}")
+        print(f"Generated and predicted fake tweet: {result['predicted_sentiment']}")
         
         return {
             "fake_tweet": tweet,
             "prediction": result
         }
     except Exception as e:
-        logger.error(f"Fake tweet prediction failed: {str(e)}")
+        print(f"Fake tweet prediction failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed: {str(e)}")

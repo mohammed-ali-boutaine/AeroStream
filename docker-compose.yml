@@ -22,6 +22,7 @@ services:
         POSTGRES_DB: backend_db
       volumes:
         - postgres_backend_data:/var/lib/postgresql/data
+        - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
       ports:
         - "5432:5432"
       healthcheck:
@@ -65,6 +66,7 @@ services:
       - ./backend:/app
       - ./models:/app/models
       - ./data:/app/data
+      - ./database:/app/database
     ports:
       - "8000:8000"
     depends_on:

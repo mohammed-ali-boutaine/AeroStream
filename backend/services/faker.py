@@ -3,10 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
 import random
-import logging
 from faker import Faker
-
-logger = logging.getLogger(__name__)
 
 fake = Faker()
 Faker.seed(42)
@@ -63,7 +60,7 @@ class FakeTweetService:
             'US Airways': '@USAirways',
             'American': '@AmericanAir'
         }
-        logger.info("FakeTweetService initialized")
+        print("FakeTweetService initialized")
     
     def generate_tweet(self) -> Tweet:
         """Generate a single fake tweet."""
@@ -128,5 +125,5 @@ class FakeTweetService:
         if not (1 <= batch_size <= 100):
             batch_size = min(max(batch_size, 1), 100)
         
-        logger.info(f"Generating {batch_size} fake tweets")
+        print(f"Generating {batch_size} fake tweets")
         return [self.generate_tweet() for _ in range(batch_size)]

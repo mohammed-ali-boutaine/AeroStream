@@ -4,13 +4,9 @@ from airflow.operators.python import PythonOperator # type: ignore
 import requests
 import psycopg2
 from psycopg2.extras import execute_values
-import logging
-import json
 import re
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
 
 # Default arguments for the DAG
 default_args = {
@@ -39,23 +35,18 @@ def fetch_data_from_api(**context):
         batch_size = 20  # Micro-batch size
         url = f"{API_BASE_URL}/fake-tweets?batch_size={batch_size}"
         
-        logger.info(f"Fetching micro-batch data from API: {url}")
         response = requests.get(url, timeout=30)
         response.raise_for_status()
         
         tweets = response.json()
-        logger.info(f"Successfully fetched {len(tweets)} tweets in micro-batch from API")
         
         # Push data to XCom for next task
         context['task_instance'].xcom_push(key='raw_tweets', value=tweets)
         
         return f"Fetched {len(tweets)} tweets in micro-batch"
-    
-    except requests.exceptions.RequestException as e:
-        logger.error(f"API request failed: {e}")
-        raise
+
     except Exception as e:
-        logger.error(f"Unexpected error in fetch_data_from_api: {e}")
+        print("API request failed: {e}")
         raise
 
 
@@ -91,7 +82,6 @@ def process_text_data(**context):
         if not tweets:
             raise ValueError("No tweets received from API")
         
-        logger.info(f"Processing and cleaning {len(tweets)} tweets")
         
         processed_data = []
         for tweet in tweets:
@@ -110,7 +100,6 @@ def process_text_data(**context):
             }
             processed_data.append(processed_tweet)
         
-        logger.info(f"Successfully processed and cleaned {len(processed_data)} tweets")
         
         # Push processed data to XCom
         context['task_instance'].xcom_push(key='processed_tweets', value=processed_data)
@@ -118,7 +107,7 @@ def process_text_data(**context):
         return f"Processed {len(processed_data)} tweets"
     
     except Exception as e:
-        logger.error(f"Error in process_text_data: {e}")
+        print(f"Error in process_text_data: {e}")
         raise
 
 
@@ -133,35 +122,10 @@ def store_in_database(**context):
             task_ids='process_text_data'
         )
         
-        if not processed_tweets:
-            raise ValueError("No processed tweets received")
-        
-        logger.info(f"Storing {len(processed_tweets)} tweets in database")
-        
+                
         # Connect to PostgreSQL
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
-        
-        # Create table if it doesn't exist (matching init.py schema)
-        create_table_query = """
-        CREATE TABLE IF NOT EXISTS airline_tweets (
-            id SERIAL PRIMARY KEY,
-            airline_sentiment VARCHAR(20) NOT NULL,
-            negativereason VARCHAR(100),
-            airline VARCHAR(50) NOT NULL,
-            text TEXT NOT NULL,
-            tweet_created TIMESTAMP,
-            clean_text TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            CONSTRAINT check_sentiment CHECK (airline_sentiment IN ('positive', 'negative', 'neutral'))
-        );
-        
-        CREATE INDEX IF NOT EXISTS idx_airline ON airline_tweets(airline);
-        CREATE INDEX IF NOT EXISTS idx_sentiment ON airline_tweets(airline_sentiment);
-        CREATE INDEX IF NOT EXISTS idx_tweet_created ON airline_tweets(tweet_created);
-        """
-        cursor.execute(create_table_query)
-        logger.info("Table created or already exists")
         
         # Prepare data for bulk insert
         insert_query = """
@@ -193,112 +157,17 @@ def store_in_database(**context):
         cursor.close()
         conn.close()
         
-        logger.info(f"Successfully stored {len(processed_tweets)} tweets. Total in DB: {total_count}")
         
         return f"Stored {len(processed_tweets)} tweets. Total: {total_count}"
     
     except Exception as e:
-        logger.error(f"Error in store_in_database: {e}")
+
+        print(f"Error in store_in_database: {e}")
         if 'conn' in locals():
             conn.rollback()
             conn.close()
         raise
 
-
-def validate_pipeline(**context):
-    """
-    Task 4: Validate and aggregate data for dashboard
-    """
-    try:
-        # Connect to database
-        conn = psycopg2.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-        
-        # Get aggregated statistics
-        cursor.execute("""
-            SELECT 
-                COUNT(*) as total_tweets,
-                COUNT(DISTINCT airline) as unique_airlines,
-                SUM(CASE WHEN airline_sentiment = 'negative' THEN 1 ELSE 0 END) as negative_tweets,
-                ROUND(
-                    100.0 * SUM(CASE WHEN airline_sentiment = 'negative' THEN 1 ELSE 0 END) / COUNT(*), 
-                    2
-                ) as negative_percentage,
-                MAX(created_at) as last_insert
-            FROM airline_tweets
-        """)
-        
-        stats = cursor.fetchone()
-        
-        # Get sentiment distribution
-        cursor.execute("""
-            SELECT airline_sentiment, COUNT(*) as count
-            FROM airline_tweets
-            GROUP BY airline_sentiment
-            ORDER BY count DESC
-        """)
-        sentiment_dist = cursor.fetchall()
-        
-        # Get airline statistics
-        cursor.execute("""
-            SELECT 
-                airline,
-                COUNT(*) as tweet_count,
-                SUM(CASE WHEN airline_sentiment = 'positive' THEN 1 ELSE 0 END) as positive,
-                SUM(CASE WHEN airline_sentiment = 'negative' THEN 1 ELSE 0 END) as negative,
-                ROUND(
-                    100.0 * SUM(CASE WHEN airline_sentiment = 'positive' THEN 1 ELSE 0 END) / COUNT(*),
-                    2
-                ) as satisfaction_rate
-            FROM airline_tweets
-            GROUP BY airline
-            ORDER BY tweet_count DESC
-            LIMIT 10
-        """)
-        airline_stats = cursor.fetchall()
-        
-        # Get main negative reasons
-        cursor.execute("""
-            SELECT 
-                negativereason,
-                COUNT(*) as count
-            FROM airline_tweets
-            WHERE negativereason IS NOT NULL AND negativereason != ''
-            GROUP BY negativereason
-            ORDER BY count DESC
-            LIMIT 10
-        """)
-        negative_reasons = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        
-        validation_result = {
-            'total_tweets': stats[0],
-            'unique_airlines': stats[1],
-            'negative_tweets': stats[2],
-            'negative_percentage': float(stats[3]) if stats[3] else 0,
-            'last_insert': str(stats[4]),
-            'sentiment_distribution': [{'sentiment': s[0], 'count': s[1]} for s in sentiment_dist],
-            'top_airlines': [
-                {
-                    'airline': a[0],
-                    'tweet_count': a[1],
-                    'positive': a[2],
-                    'negative': a[3],
-                    'satisfaction_rate': float(a[4])
-                } for a in airline_stats
-            ],
-            'top_negative_reasons': [{'reason': r[0], 'count': r[1]} for r in negative_reasons]
-        }
-        
-        logger.info(f"Pipeline validation and aggregation completed: {validation_result}")
-        
-        return validation_result
-    
-    except Exception as e:
-        logger.error(f"Error in validate_pipeline: {e}")
-        raise
 
 
 # Define the DAG
@@ -332,12 +201,5 @@ with DAG(
         provide_context=True,
     )
     
-    # Task 4: Validate pipeline
-    validate = PythonOperator(
-        task_id='validate_pipeline',
-        python_callable=validate_pipeline,
-        provide_context=True,
-    )
-    
     # Define task dependencies
-    fetch_data >> process_data >> store_data >> validate
+    fetch_data >> process_data >> store_data 

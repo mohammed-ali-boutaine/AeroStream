@@ -10,8 +10,7 @@ from datetime import datetime
 DB_URL = "postgresql://ali:root@postgres_backend:5432/backend_db"
 
 st.set_page_config(
-    page_title="✈️ AeroStream - Analyse des Sentiments",
-    page_icon="✈️",
+    page_title="AeroStream - Analyse des Sentiments",
     layout="wide",
     initial_sidebar_state="expanded"
 )
