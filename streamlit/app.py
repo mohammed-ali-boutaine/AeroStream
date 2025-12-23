@@ -30,15 +30,12 @@ st.markdown("""
         font-weight: bold;
         color: #000000;
         text-align: center;
-        margin-bottom: 2rem;
     }
     .kpi-container {
         background-color: #ffffff;
-        padding: 2rem;
         border-radius: 1rem;
         border: 2px solid #e0e0e0;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        margin-bottom: 2rem;
     }
     h1, h2, h3, h4, h5, h6, p, div, span, label {
         color: #000000 !important;
@@ -178,7 +175,7 @@ if kpi_data is None or kpi_data['total_tweets'] == 0:
     st.info("Le pipeline ETL collecte les données en micro-batch, nettoie et prédit les sentiments, puis les stocke dans PostgreSQL.")
 else:
     # KPI Cards in bordered container
-    st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+    # st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
     st.markdown("### Indicateurs Clés de Performance (KPI)")
     
     col1, col2, col3 = st.columns(3)
@@ -205,9 +202,9 @@ else:
             delta_color="inverse",
             help="Proportion de tweets avec un sentiment négatif"
         )
-    st.markdown('</div>', unsafe_allow_html=True)
+    # st.markdown('</div>', unsafe_allow_html=True)
     
-    st.divider()
+    # st.divider()
     
     # Sentiment Distribution and Time Series side by side
     st.markdown("### Répartition des Sentiments")
@@ -245,55 +242,84 @@ else:
             st.plotly_chart(fig_pie, use_container_width=True)
     
     with col2:
-        time_series = fetch_time_series_data()
-        if not time_series.empty:
-            fig_time = go.Figure()
+        satisfaction_df = fetch_sentiment_by_airline()
+        if not satisfaction_df.empty:
+            # Calculate satisfaction rate (positive / total * 100)
+            satisfaction_df['satisfaction_rate'] = (satisfaction_df['positive_pct']).round(2)
+            satisfaction_sorted = satisfaction_df.sort_values('satisfaction_rate', ascending=True)
             
-            fig_time.add_trace(go.Scatter(
-                x=time_series['hour'],
-                y=time_series['positive'],
-                name='Positif',
-                mode='lines+markers',
-                line=dict(color='#28a745', width=2),
-                fill='tonexty'
+            fig_satisfaction = go.Figure()
+            
+            fig_satisfaction.add_trace(go.Bar(
+                x=satisfaction_sorted['satisfaction_rate'],
+                y=satisfaction_sorted['airline'],
+                orientation='h',
+                marker=dict(
+                    color=satisfaction_sorted['satisfaction_rate'],
+                    colorscale='Purples',
+                    showscale=False
+                ),
+                text=satisfaction_sorted['satisfaction_rate'].apply(lambda x: f'{x:.1f}%'),
+                textposition='outside'
             ))
             
-            fig_time.add_trace(go.Scatter(
-                x=time_series['hour'],
-                y=time_series['neutral'],
-                name='Neutre',
-                mode='lines+markers',
-                line=dict(color='#ffc107', width=2),
-                fill='tonexty'
-            ))
-            
-            fig_time.add_trace(go.Scatter(
-                x=time_series['hour'],
-                y=time_series['negative'],
-                name='Négatif',
-                mode='lines+markers',
-                line=dict(color='#8b5cf6', width=2),
-                fill='tonexty'
-            ))
-            
-            fig_time.update_layout(
-                title="Évolution Temporelle des Tweets",
-                xaxis_title="Date et Heure",
-                yaxis_title="Nombre de Tweets",
+            fig_satisfaction.update_layout(
+                title="Calcul du taux de satisfaction par compagnie",
+                xaxis_title="Taux de satisfaction (%)",
+                yaxis_title="Compagnie",
                 height=400,
-                hovermode='x unified',
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#000000'),
                 title_font=dict(color='#000000'),
                 xaxis=dict(title_font=dict(color='#000000'), tickfont=dict(color='#000000')),
                 yaxis=dict(title_font=dict(color='#000000'), tickfont=dict(color='#000000')),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color='#000000'))
+                showlegend=False
             )
             
-            st.plotly_chart(fig_time, use_container_width=True)
+            st.plotly_chart(fig_satisfaction, use_container_width=True)
     
-    st.divider()
+    # st.divider()
+    
+    # Tweet Volume by Airline
+    st.markdown("### Mesure du volume de tweets par compagnie")
+    
+    volume_df = fetch_sentiment_by_airline()
+    if not volume_df.empty:
+        volume_sorted = volume_df.sort_values('total', ascending=True)
+        
+        fig_volume = go.Figure()
+        
+        fig_volume.add_trace(go.Bar(
+            x=volume_sorted['total'],
+            y=volume_sorted['airline'],
+            orientation='h',
+            marker=dict(
+                color=volume_sorted['total'],
+                colorscale='Purples',
+                showscale=False
+            ),
+            text=volume_sorted['total'],
+            textposition='outside'
+        ))
+        
+        fig_volume.update_layout(
+            title="Volume de Tweets par Compagnie",
+            xaxis_title="Nombre de Tweets",
+            yaxis_title="Compagnie",
+            height=400,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#000000'),
+            title_font=dict(color='#000000'),
+            xaxis=dict(title_font=dict(color='#000000'), tickfont=dict(color='#000000')),
+            yaxis=dict(title_font=dict(color='#000000'), tickfont=dict(color='#000000')),
+            showlegend=False
+        )
+        
+        st.plotly_chart(fig_volume, use_container_width=True)
+    
+    # st.divider()
     
     # Sentiment Distribution by Airline
     st.markdown("### Distribution des Sentiments par Compagnie")
