@@ -1,3 +1,4 @@
+```
 ┌──────────────┐
 │ Streamlit UI │  → visualize results, trigger jobs
 └──────┬───────┘
@@ -12,6 +13,7 @@
 │ (training code)   │
 └───────────────────┘
 
+```
 
 docker compose up -d
 
