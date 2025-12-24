@@ -1,7 +1,3 @@
-# AeroStream - Documentation Technique Complète
-
-## Description
-
 AeroStream est une plateforme d'analyse de sentiments en temps réel pour les tweets concernant les compagnies aériennes américaines. Le système collecte, nettoie, analyse et visualise les sentiments des clients en utilisant des techniques avancées de Machine Learning et NLP.
 
 Cette solution intelligente permet aux compagnies aériennes de surveiller en continu les retours clients sur les réseaux sociaux, d'identifier rapidement les tendances négatives et de réagir proactivement pour améliorer l'expérience client.
