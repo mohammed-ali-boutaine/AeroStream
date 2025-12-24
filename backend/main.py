@@ -14,7 +14,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS - allow all origins
+# cors config
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,7 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize prediction service
+# Init services
 try:
     predictor = AirlineSentimentService()
     print("Prediction service initialized successfully")
@@ -30,16 +30,12 @@ except Exception as e:
     print(f"Failed to initialize prediction service: {e}")
     predictor = None
 
-
-# Initialize fake tweet service
 try:
     faker = FakeTweetService()
     print("Fake tweet service initialized successfully")
 except Exception as e:
     print(f"Failed to initialize fake tweet service: {e}")
     faker = None
-
-
 
 
 @app.get("/")
@@ -162,10 +158,10 @@ async def predict_fake_tweet():
         )
     
     try:
-        # Generate fake tweet
+
+        # generate fake tweet and predict
         tweet = faker.generate_tweet()
         
-        # Predict sentiment
         result = predictor.predict(tweet.text)
         
         print(f"Generated and predicted fake tweet: {result['predicted_sentiment']}")
@@ -177,3 +173,22 @@ async def predict_fake_tweet():
     except Exception as e:
         print(f"Fake tweet prediction failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed: {str(e)}")
+
+
+from sqlalchemy import create_engine,text
+import json
+@app.get("/test")
+def get():
+
+    db_url =  "postgresql://ali:root@postgres_backend:5432/backend_db"
+
+    engine = create_engine(db_url)
+
+    with engine.connect() as conn :
+        rslt = conn.execute(text("select * from airline_tweets")).fetchall()
+
+        print(rslt)
+
+        return {
+            "data" : "hy"
+        }

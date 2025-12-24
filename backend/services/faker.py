@@ -1,4 +1,3 @@
-"""Fake Tweet Generator Service."""
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone

@@ -6,7 +6,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 
-# Default arguments for the DAG
+# default arguments
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
@@ -15,7 +15,7 @@ default_args = {
     'retry_delay': timedelta(minutes=3),
 }
 
-# Configuration
+# config
 API_BASE_URL = 'http://host.docker.internal:8000'  
 DB_CONFIG = {
     'host': 'postgres_backend',  
@@ -26,9 +26,6 @@ DB_CONFIG = {
 
 
 def health_check_api(**context):
-    """
-    Task 1: Health check - Verify API is available before proceeding
-    """
     try:
         url = f"{API_BASE_URL}/health"
         
@@ -48,11 +45,9 @@ def health_check_api(**context):
 
 
 def fetch_data_from_api(**context):
-    """
-    Task 2: Fetch fake tweets from the API in micro-batches
-    """
+
     try:
-        batch_size = 20  # Micro-batch size
+        batch_size = 20  
         url = f"{API_BASE_URL}/fake-tweets?batch_size={batch_size}"
         
         response = requests.get(url, timeout=30)
@@ -60,7 +55,6 @@ def fetch_data_from_api(**context):
         
         tweets = response.json()
         
-        # Push data to XCom for next task
         context['task_instance'].xcom_push(key='raw_tweets', value=tweets)
         
         return f"Fetched {len(tweets)} tweets in micro-batch"
@@ -71,11 +65,7 @@ def fetch_data_from_api(**context):
 
 
 def store_in_database(**context):
-    """
-    Task 3: Store sentiment predictions in PostgreSQL database
-    """
     try:
-        # Pull raw tweets from XCom
         tweets = context['task_instance'].xcom_pull(
             key='raw_tweets', 
             task_ids='fetch_data_from_api'
@@ -84,7 +74,6 @@ def store_in_database(**context):
         if not tweets:
             raise ValueError("No tweets received from API")
                 
-        # Connect to PostgreSQL
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
         
@@ -106,17 +95,14 @@ def store_in_database(**context):
             for tweet in tweets
         ]
         
-        # Bulk insert
         execute_values(cursor, insert_query, values)
         conn.commit()
         
-        # Get total count
         cursor.execute("SELECT COUNT(*) FROM airline_tweets")
         total_count = cursor.fetchone()[0]
         
         cursor.close()
         conn.close()
-        
         
         return f"Stored {len(tweets)} tweets. Total: {total_count}"
     
@@ -135,32 +121,31 @@ with DAG(
     'airline_sentiment_etl_pipeline',
     default_args=default_args,
     description='ETL: Health check, fetch tweets in micro-batches, and store in PostgreSQL',
-    # schedule_interval='@hourly',  # Run every hour for micro-batch processing
     schedule_interval='*/1 * * * *',
     catchup=False,
     tags=['etl', 'sentiment-analysis', 'airline', 'micro-batch'],
 ) as dag:
     
-    # Task 1: Health check API
+    # task 1: Health check API
     health_check = PythonOperator(
         task_id='health_check_api',
         python_callable=health_check_api,
         provide_context=True,
     )
     
-    # Task 2: Fetch data from API
+    # task 2: Fetch data from API
     fetch_data = PythonOperator(
         task_id='fetch_data_from_api',
         python_callable=fetch_data_from_api,
         provide_context=True,
     )
     
-    # Task 3: Store in database
+    # task 3: Store in database
     store_data = PythonOperator(
         task_id='store_in_database',
         python_callable=store_in_database,
         provide_context=True,
     )
     
-    # Define task dependencies
+    # define dependencies
     health_check >> fetch_data >> store_data 
